@@ -71,7 +71,7 @@ int main() {
         long diff = calculate_frame_difference(prev_frame_y, pic_in.img.plane[0], y_size);
 
         if (diff < THRESHOLD && frame_count > 1) {
-            printf("Kare: %d\t Fark: %ld ATLANDI\n", frame_count, diff);
+            printf("Kare: %d\t Fark: %ld ATILDI\n", frame_count, diff);
         }
 
         else {
@@ -123,7 +123,7 @@ int main() {
     fclose(file_tc);
 
     system("ffmpeg -y -i mov/orta.mov -vn -c:a aac aac/orta.aac");
-    system("mkvmerge -o mkv/orta.mkv --timestamp 0:times/orta.txt h264/orta.h264 orta.acc");
+    system("mkvmerge -o mkv/orta.mkv --timestamps 0:times/orta.txt h264/orta.h264 aac/orta.aac");
 
     return 0;
 }

@@ -1,8 +1,8 @@
 .vscode
-.aac
-.h264
-.mkv
-.mov
-.txt
-.yuv
+*.aac
+*.h264
+*.mkv
+*.mov
+*.txt
+*.yuv
 vfr

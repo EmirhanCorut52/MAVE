@@ -122,5 +122,8 @@ int main() {
     fclose(file_out);
     fclose(file_tc);
 
+    system("ffmpeg -y -i mov/orta.mov -vn -c:a aac aac/orta.aac");
+    system("mkvmerge -o mkv/orta.mkv --timestamp 0:times/orta.txt h264/orta.h264 orta.acc");
+
     return 0;
 }

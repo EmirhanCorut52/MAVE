@@ -24,7 +24,7 @@ long calculate_frame_difference (uint8_t *frame1, uint8_t *frame2, int size) {
 int main() {
     FILE *file_in = fopen("yuv/orta.yuv", "rb");
     FILE *file_out = fopen("h264/orta.h264", "wb");
-    FILE *file_tc = fopen("times/orta.txt", "w");
+    FILE *file_tc = fopen("time/orta.txt", "w");
 
     fprintf(file_tc, "# timecode format v2\n");
 
@@ -123,7 +123,7 @@ int main() {
     fclose(file_tc);
 
     system("ffmpeg -y -i mov/orta.mov -vn -c:a aac aac/orta.aac");
-    system("mkvmerge -o mkv/orta.mkv --timestamps 0:times/orta.txt h264/orta.h264 aac/orta.aac");
+    system("mkvmerge -o mkv/orta.mkv --timestamps 0:time/orta.txt h264/orta.h264 aac/orta.aac");
 
     return 0;
 }

@@ -39,16 +39,13 @@ int main(int argc, char *argv[]) {
 
     const char *base_name = argv[1];
     char yuv_path[256], h264_path[256], tc_path[256], aac_path[256], mkv_path[256], mov_path[256];
-    char cmd_aac[2048], cmd_mkv[2048], cmd_yuv[2048];
+    char cmd_aac[2048], cmd_mkv[2048];
 
     snprintf(yuv_path, sizeof(yuv_path), "yuv/%s.yuv", base_name);
     snprintf(h264_path, sizeof(h264_path), "h264/%s.h264", base_name);
-    snprintf(tc_path, sizeof(tc_path), "time/%s.txt", base_name);
+    snprintf(tc_path, sizeof(tc_path), "timecode/%s.txt", base_name);
     snprintf(aac_path, sizeof(aac_path), "aac/%s.aac", base_name);
     snprintf(mkv_path, sizeof(mkv_path), "mkv/%s.mkv", base_name);
-    snprintf(mov_path, sizeof(mov_path), "mov/%s.mov", base_name);
-    snprintf(cmd_yuv, sizeof(cmd_yuv), "ffmpeg -y -i '%s' -c:v rawvideo -pix_fmt yuv420p -s %dx%d '%s' -loglevel warning", mov_path, WIDTH, HEIGHT, yuv_path);
-    system(cmd_yuv);
 
     FILE *file_in = fopen(yuv_path, "rb");
     FILE *file_out = fopen(h264_path, "wb");
@@ -80,10 +77,14 @@ int main(int argc, char *argv[]) {
 
     if (!encoder) {
         printf("x264 Baslamadi!");
+        fclose(file_in);
+        fclose(file_out);
+        fclose(file_tc);
         return -1;
     }
 
     x264_picture_t pic_in, pic_out;
+
     if (x264_picture_alloc(&pic_in, X264_CSP_I420, WIDTH, HEIGHT) != 0) {
         printf("x264_picture_alloc basarisiz!\n");
         x264_encoder_close(encoder);
@@ -94,8 +95,8 @@ int main(int argc, char *argv[]) {
     }
 
     int y_size = WIDTH * HEIGHT;
-
     uint8_t *prev_frame_y = (uint8_t*)calloc(y_size, 1);
+
     if (!prev_frame_y) {
         printf("Bellek ayrilamadi!\n");
         x264_picture_clean(&pic_in);
@@ -109,7 +110,7 @@ int main(int argc, char *argv[]) {
     int frame_count = 0;
     int encoded_count = 0;
 
-    while (fread(pic_in.img.plane[0], 1, y_size, file_in) == y_size) {
+    while (fread(pic_in.img.plane[0], 1, y_size, file_in) == (size_t)y_size) {
         if (fread(pic_in.img.plane[1], 1, y_size / 4, file_in) != (size_t)(y_size / 4)) break;
         if (fread(pic_in.img.plane[2], 1, y_size / 4, file_in) != (size_t)(y_size / 4)) break;
 
@@ -145,9 +146,10 @@ int main(int argc, char *argv[]) {
                 printf("x264 encode hatasi!\n");
                 break;
             }
+
+            memcpy(prev_frame_y, pic_in.img.plane[0], y_size);
         }
 
-        memcpy(prev_frame_y, pic_in.img.plane[0], y_size);
     }
 
     while (1) {
@@ -185,9 +187,15 @@ int main(int argc, char *argv[]) {
     fclose(file_tc);
 
     snprintf(cmd_aac, sizeof(cmd_aac), "ffmpeg -y -i '%s' -vn -c:a aac '%s' -loglevel warning", mov_path, aac_path);
-    system(cmd_aac);
+    if (system(cmd_aac) != 0) {
+        printf("AAC cikarma hatasi!\n");
+        return -1;
+    }
     snprintf(cmd_mkv, sizeof(cmd_mkv), "mkvmerge -o '%s' --timestamps 0:'%s' '%s' '%s'", mkv_path, tc_path, h264_path, aac_path);
-    system(cmd_mkv);
+    if (system(cmd_mkv) != 0) {
+        printf("MKV birlestirme hatasi!\n");
+        return -1;
+    }
 
     return 0;
 }

@@ -10,3 +10,11 @@
 # .AAC OUTPUT
 
 ### ffmpeg -i mov/.mov -vn -c:a aac aac/.aac
+
+# COMPILE CODE 
+
+### gcc main.c -o vfr -lx264 -Wall
+
+# EXECUTE CODE 
+
+### ./vfr yuv/.yuv

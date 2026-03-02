@@ -33,7 +33,7 @@ long calculate_frame_difference(uint8_t *frame1, uint8_t *frame2, int size) {
 int main(int argc, char *argv[]) {
 
     if (argc < 2) {
-        printf("Dosya ismi girilmedi");
+        printf("Dosya ismi girilmedi\n");
         return -1;
     }
 
@@ -46,13 +46,14 @@ int main(int argc, char *argv[]) {
     snprintf(tc_path, sizeof(tc_path), "timecode/%s.txt", base_name);
     snprintf(aac_path, sizeof(aac_path), "aac/%s.aac", base_name);
     snprintf(mkv_path, sizeof(mkv_path), "mkv/%s.mkv", base_name);
+    snprintf(mov_path, sizeof(mov_path), "mov/%s.mov", base_name);
 
     FILE *file_in = fopen(yuv_path, "rb");
     FILE *file_out = fopen(h264_path, "wb");
     FILE *file_tc = fopen(tc_path, "w");
 
     if (!file_in || !file_out || !file_tc) {
-        printf("Dosyalar Acilamadi!");
+        printf("Dosyalar Acilamadi\n");
         if (file_in) fclose(file_in);
         if (file_out) fclose(file_out);
         if (file_tc) fclose(file_tc);
@@ -76,7 +77,7 @@ int main(int argc, char *argv[]) {
     x264_t *encoder = x264_encoder_open(&param);
 
     if (!encoder) {
-        printf("x264 Baslamadi!");
+        printf("x264 Baslamadi\n");
         fclose(file_in);
         fclose(file_out);
         fclose(file_tc);
@@ -86,7 +87,7 @@ int main(int argc, char *argv[]) {
     x264_picture_t pic_in, pic_out;
 
     if (x264_picture_alloc(&pic_in, X264_CSP_I420, WIDTH, HEIGHT) != 0) {
-        printf("x264_picture_alloc basarisiz!\n");
+        printf("x264_picture_alloc basarisiz\n");
         x264_encoder_close(encoder);
         fclose(file_in);
         fclose(file_out);
@@ -98,7 +99,7 @@ int main(int argc, char *argv[]) {
     uint8_t *prev_frame_y = (uint8_t*)calloc(y_size, 1);
 
     if (!prev_frame_y) {
-        printf("Bellek ayrilamadi!\n");
+        printf("Bellek ayrilamadi\n");
         x264_picture_clean(&pic_in);
         x264_encoder_close(encoder);
         fclose(file_in);
@@ -134,7 +135,7 @@ int main(int argc, char *argv[]) {
 
             if (frame_bytes > 0) {
                 if (write_nals(file_out, nals, i_nals) != 0) {
-                    printf("H264 yazma hatasi!\n");
+                    printf("H264 yazma hatasi\n");
                     break;
                 }
                 encoded_count++;
@@ -143,7 +144,7 @@ int main(int argc, char *argv[]) {
                 fprintf(file_tc, "%lld\n", ms);
             }
             else if (frame_bytes < 0) {
-                printf("x264 encode hatasi!\n");
+                printf("x264 encode hatasi\n");
                 break;
             }
 
@@ -161,7 +162,7 @@ int main(int argc, char *argv[]) {
             break;
 
         if (write_nals(file_out, nals, i_nals) != 0) {
-            printf("H264 yazma hatasi!\n");
+            printf("H264 yazma hatasi\n");
             break;
         }
         encoded_count++;
@@ -188,12 +189,12 @@ int main(int argc, char *argv[]) {
 
     snprintf(cmd_aac, sizeof(cmd_aac), "ffmpeg -y -i '%s' -vn -c:a aac '%s' -loglevel warning", mov_path, aac_path);
     if (system(cmd_aac) != 0) {
-        printf("AAC cikarma hatasi!\n");
+        printf("AAC cikarma hatasi\n");
         return -1;
     }
     snprintf(cmd_mkv, sizeof(cmd_mkv), "mkvmerge -o '%s' --timestamps 0:'%s' '%s' '%s'", mkv_path, tc_path, h264_path, aac_path);
     if (system(cmd_mkv) != 0) {
-        printf("MKV birlestirme hatasi!\n");
+        printf("MKV birlestirme hatasi\n");
         return -1;
     }
 

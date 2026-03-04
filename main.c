@@ -2,10 +2,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <sys/wait.h>
 #include <x264.h>
 
-#define WIDTH 1080
-#define HEIGHT 1920
 #define THRESHOLD 5
 
 static int write_nals(FILE *file_out, x264_nal_t *nals, int i_nals) {
@@ -30,18 +30,62 @@ long calculate_frame_difference(uint8_t *frame1, uint8_t *frame2, int size) {
     return total_diff / size;
 }
 
-int main(int argc, char *argv[]) {
-
-    if (argc < 2) {
-        printf("Dosya ismi girilmedi\n");
+static int run_command(char *const args[]) {
+    pid_t pid = fork();
+    if (pid < 0) {
         return -1;
     }
 
-    const char *base_name = argv[1];
-    char yuv_path[256], h264_path[256], tc_path[256], aac_path[256], mkv_path[256], mov_path[256];
-    char cmd_aac[2048], cmd_mkv[2048];
+    if (pid == 0) {
+        execvp(args[0], args);
+        _exit(127);
+    }
 
-    snprintf(yuv_path, sizeof(yuv_path), "yuv/%s.yuv", base_name);
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        return -1;
+    }
+
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int main(int argc, char *argv[]) {
+
+    if (argc != 4) {
+        printf("Hatali Arguman Sayisi\n");
+        printf("Kullanim: <input.yuv> <yatay piksel> <dikey piksel>\n");
+        return -1;
+    }
+
+    int WIDTH = atoi(argv[2]);
+    int HEIGHT = atoi(argv[3]);
+
+    if (WIDTH <= 0 || HEIGHT <= 0) {
+        printf("Gecersiz piksel degeri\n");
+        return -1;
+    }
+
+    char h264_path[256], tc_path[256], aac_path[256], mkv_path[256], mov_path[256];
+    char base_name[242], tc_input_arg[300];
+
+    const char *yuv_path = argv[1];
+    const char *last_slash = strrchr(yuv_path, '/');
+    const char *filename = last_slash ? last_slash + 1 : yuv_path;
+    const char *dot = strrchr(filename, '.');
+    size_t name_len = dot ? (size_t)(dot - filename) : strlen(filename);
+
+    if (name_len > sizeof(base_name) - 1) {
+        printf("Dosya ismi cok uzun, islem iptal edildi\n");
+        return -1;
+    }
+
+    strncpy(base_name, filename, name_len);
+    base_name[name_len] = '\0';
+
     snprintf(h264_path, sizeof(h264_path), "h264/%s.h264", base_name);
     snprintf(tc_path, sizeof(tc_path), "timecode/%s.txt", base_name);
     snprintf(aac_path, sizeof(aac_path), "aac/%s.aac", base_name);
@@ -96,6 +140,7 @@ int main(int argc, char *argv[]) {
     }
 
     int y_size = WIDTH * HEIGHT;
+    int frame_size = y_size + (y_size / 2);
     uint8_t *prev_frame_y = (uint8_t*)calloc(y_size, 1);
 
     if (!prev_frame_y) {
@@ -110,16 +155,26 @@ int main(int argc, char *argv[]) {
 
     int frame_count = 0;
     int encoded_count = 0;
+    int total_frames = 0;
+
+    if (fseek(file_in, 0, SEEK_END) == 0) {
+        long file_size = ftell(file_in);
+        if (file_size > 0) {
+            total_frames = (int)(file_size / frame_size);
+        }
+        fseek(file_in, 0, SEEK_SET);
+    }
 
     while (fread(pic_in.img.plane[0], 1, y_size, file_in) == (size_t)y_size) {
         if (fread(pic_in.img.plane[1], 1, y_size / 4, file_in) != (size_t)(y_size / 4)) break;
         if (fread(pic_in.img.plane[2], 1, y_size / 4, file_in) != (size_t)(y_size / 4)) break;
 
         frame_count ++;
+        int is_last_frame = (total_frames > 0 && frame_count == total_frames);
 
         long diff = calculate_frame_difference(prev_frame_y, pic_in.img.plane[0], y_size);
 
-        if (diff < THRESHOLD && frame_count > 1) {
+        if (diff < THRESHOLD && frame_count > 1 && !is_last_frame) {
             printf("Kare: %d\t Fark: %ld ATILDI\n", frame_count, diff);
         }
 
@@ -175,9 +230,9 @@ int main(int argc, char *argv[]) {
     printf("Encode olan kare: %d\n", encoded_count);
     if (frame_count > 0) {
         float saved_percent = (1.0f - ((float)encoded_count / (float)frame_count)) * 100.0f;
-        printf("Tasarruf Orani: %% %.2f\n", saved_percent);
+        printf("Kare Tasarruf Orani: %% %.2f\n", saved_percent);
     } else {
-        printf("Tasarruf Orani: %% 0.00\n");
+        printf("Kare Tasarruf Orani: %% 0.00\n");
     }
 
     x264_encoder_close(encoder);
@@ -187,13 +242,19 @@ int main(int argc, char *argv[]) {
     fclose(file_out);
     fclose(file_tc);
 
-    snprintf(cmd_aac, sizeof(cmd_aac), "ffmpeg -y -i '%s' -vn -c:a aac '%s' -loglevel warning", mov_path, aac_path);
-    if (system(cmd_aac) != 0) {
+    char *ffmpeg_args[] = {
+        "ffmpeg", "-y", "-i", mov_path, "-vn", "-c:a", "aac", aac_path, "-loglevel", "warning", NULL
+    };
+    if (run_command(ffmpeg_args) != 0) {
         printf("AAC cikarma hatasi\n");
         return -1;
     }
-    snprintf(cmd_mkv, sizeof(cmd_mkv), "mkvmerge -o '%s' --timestamps 0:'%s' '%s' '%s'", mkv_path, tc_path, h264_path, aac_path);
-    if (system(cmd_mkv) != 0) {
+
+    snprintf(tc_input_arg, sizeof(tc_input_arg), "0:%s", tc_path);
+    char *mkvmerge_args[] = {
+        "mkvmerge", "-o", mkv_path, "--timestamps", tc_input_arg, h264_path, aac_path, NULL
+    };
+    if (run_command(mkvmerge_args) != 0) {
         printf("MKV birlestirme hatasi\n");
         return -1;
     }

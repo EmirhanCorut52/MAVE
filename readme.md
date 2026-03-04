@@ -17,4 +17,4 @@
 
 # EXECUTE CODE 
 
-### ./vfr filename
+### ./vfr yuv/.yuv

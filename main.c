@@ -163,8 +163,6 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    int frame_count = 0;
-    int encoded_count = 0;
     int total_frames = 0;
     int file_error = 0;
 
@@ -185,7 +183,11 @@ int main(int argc, char *argv[]) {
         else {
             total_frames = (int)(file_size / frame_size);
             printf("Toplam islenecek kare: %d\n", total_frames);
-            fseeko(file_in, 0, SEEK_SET);
+            
+            if (fseeko(file_in, 0, SEEK_SET) != 0) {
+                printf("fseeko basarisiz\n");
+                file_error = 1;
+            }
         }
     }
 
@@ -203,6 +205,10 @@ int main(int argc, char *argv[]) {
         fclose(file_tc);
         return -1;
     }
+
+    int frame_count = 0;
+    int encoded_count = 0;
+    int encoder_error = 0;
     
     while (fread(pic_in.img.plane[0], 1, y_size, file_in) == (size_t)y_size) {
         if (fread(pic_in.img.plane[1], 1, y_size / 4, file_in) != (size_t)(y_size / 4)) {
@@ -229,9 +235,16 @@ int main(int argc, char *argv[]) {
             int i_nals;
             int frame_bytes = x264_encoder_encode(encoder, &nals, &i_nals, &pic_in, &pic_out);
 
-            if (frame_bytes > 0) {
+            if (frame_bytes < 0) {
+                printf("x264 encode hatasi\n");
+                encoder_error = 1;
+                break;
+            }
+
+            else if (frame_bytes > 0) {
                 if (write_nals(file_out, nals, i_nals) != 0) {
                     printf("H264 yazma hatasi\n");
+                    encoder_error = 1;
                     break;
                 }
 
@@ -239,27 +252,42 @@ int main(int argc, char *argv[]) {
                 double ms = (double)(pic_out.i_pts * 1000.0 / FPS);
                 fprintf(file_tc, "%.3f\n", ms);
             }
-
-            else if (frame_bytes < 0) {
-                printf("x264 encode hatasi\n");
-                break;
-            }
-
-            memcpy(prev_frame_y, pic_in.img.plane[0], y_size);
         }
+        memcpy(prev_frame_y, pic_in.img.plane[0], y_size);
     }
 
-    while (1) {
+    if (ferror(file_in)) {
+        printf("YUV dosyasi okunurken disk I/O hatasi olustu!\n");
+        encoder_error = 1;
+    }
+
+    else if (feof(file_in)) {
+        printf("Video dosyasinin sonuna basariyla ulasildi.\n");
+    }
+
+    else {
+        printf("Bilinmeyen bir nedenden dolayi okuma yarida kesildi.\n");
+        encoder_error = 1;
+    }
+
+    while (!encoder_error) {
         x264_nal_t *nals;
         int i_nals;
         int frame_bytes = x264_encoder_encode(encoder, &nals, &i_nals, NULL, &pic_out);
-        
-        if (frame_bytes <= 0) {
+
+        if (frame_bytes < 0) {
+            printf("x264 flush hatasi\n");
+            encoder_error = 1;
+            break;
+        }
+
+        if (frame_bytes == 0) {
             break;
         }
 
         if (write_nals(file_out, nals, i_nals) != 0) {
             printf("H264 yazma hatasi\n");
+            encoder_error = 1;
             break;
         }
 
@@ -268,16 +296,16 @@ int main(int argc, char *argv[]) {
         fprintf(file_tc, "%.3f\n", ms);
     }
 
-    printf("Toplam Kare: %d\n", frame_count);
+    printf("Toplam kare: %d\n", frame_count);
     printf("Encode olan kare: %d\n", encoded_count);
 
     if (frame_count > 0) {
         float saved_percent = (1.0f - ((float)encoded_count / (float)frame_count)) * 100.0f;
-        printf("Kare Tasarruf Orani: %% %.2f\n", saved_percent);
+        printf("Kare tasarruf orani: %% %.2f\n", saved_percent);
     }
 
     else {
-        printf("Kare sayisi 0, tasarruf oranı hesaplanamadi\n");
+        printf("Kare sayisi 0, tasarruf orani hesaplanamadi\n");
     }
 
     free(prev_frame_y);
@@ -286,6 +314,11 @@ int main(int argc, char *argv[]) {
     fclose(file_in);
     fclose(file_out);
     fclose(file_tc);
+
+    if (encoder_error) {
+        printf("Encode islemi hatayla sonlandi\n");
+        return -1;
+    }
 
     snprintf(tc_input_arg, sizeof(tc_input_arg), "0:%s", tc_path);
     char *mkvmerge_args[] = {

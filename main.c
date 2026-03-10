@@ -11,11 +11,13 @@
 #define THRESHOLD 5
 
 static int write_nals(FILE *file_out, x264_nal_t *nals, int i_nals) {
+    
     for (int i = 0; i < i_nals; i++) {
         if (fwrite(nals[i].p_payload, 1, nals[i].i_payload, file_out) != (size_t)nals[i].i_payload) {
             return -1;
         }
     }
+
     return 0;
 }
 
@@ -36,6 +38,7 @@ int calculate_frame_difference(uint8_t *frame1, uint8_t *frame2, int size) {
 
 static int run_command(char *const args[]) {
     pid_t pid = fork();
+
     if (pid < 0) {
         return -1;
     }
@@ -46,6 +49,7 @@ static int run_command(char *const args[]) {
     }
 
     int status = 0;
+
     if (waitpid(pid, &status, 0) < 0) {
         return -1;
     }
@@ -79,7 +83,7 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    char h264_path[256], tc_path[256], aac_path[256], mkv_path[256];
+    char h264_path[256], tc_path[256], mkv_path[256];
     char base_name[242], tc_input_arg[260];
 
     const char *yuv_path = argv[1];
@@ -98,7 +102,6 @@ int main(int argc, char *argv[]) {
 
     snprintf(h264_path, sizeof(h264_path), "h264/%s.h264", base_name);
     snprintf(tc_path, sizeof(tc_path), "timecode/%s.txt", base_name);
-    snprintf(aac_path, sizeof(aac_path), "aac/%s.aac", base_name);
     snprintf(mkv_path, sizeof(mkv_path), "mkv/%s.mkv", base_name);
 
     FILE *file_in = fopen(yuv_path, "rb");
@@ -117,7 +120,6 @@ int main(int argc, char *argv[]) {
 
     x264_param_t param;
     x264_param_default_preset(&param, "medium", "zerolatency");
-
     param.i_width = WIDTH;
     param.i_height = HEIGHT;
     param.i_fps_num = FPS;
@@ -208,12 +210,14 @@ int main(int argc, char *argv[]) {
 
     int frame_count = 0;
     int encoded_count = 0;
-    int encoder_error = 0;
+    int encode_error = 0;
     
     while (fread(pic_in.img.plane[0], 1, y_size, file_in) == (size_t)y_size) {
+
         if (fread(pic_in.img.plane[1], 1, y_size / 4, file_in) != (size_t)(y_size / 4)) {
             break;
         }
+
         if (fread(pic_in.img.plane[2], 1, y_size / 4, file_in) != (size_t)(y_size / 4)) {
             break;
         }
@@ -237,14 +241,14 @@ int main(int argc, char *argv[]) {
 
             if (frame_bytes < 0) {
                 printf("x264 encode hatasi\n");
-                encoder_error = 1;
+                encode_error = 1;
                 break;
             }
 
             else if (frame_bytes > 0) {
                 if (write_nals(file_out, nals, i_nals) != 0) {
                     printf("H264 yazma hatasi\n");
-                    encoder_error = 1;
+                    encode_error = 1;
                     break;
                 }
 
@@ -252,13 +256,13 @@ int main(int argc, char *argv[]) {
                 double ms = (double)(pic_out.i_pts * 1000.0 / FPS);
                 fprintf(file_tc, "%.3f\n", ms);
             }
+            memcpy(prev_frame_y, pic_in.img.plane[0], y_size);
         }
-        memcpy(prev_frame_y, pic_in.img.plane[0], y_size);
     }
 
     if (ferror(file_in)) {
         printf("YUV dosyasi okunurken disk I/O hatasi olustu!\n");
-        encoder_error = 1;
+        encode_error = 1;
     }
 
     else if (feof(file_in)) {
@@ -267,17 +271,17 @@ int main(int argc, char *argv[]) {
 
     else {
         printf("Bilinmeyen bir nedenden dolayi okuma yarida kesildi.\n");
-        encoder_error = 1;
+        encode_error = 1;
     }
 
-    while (!encoder_error) {
+    while (!encode_error) {
         x264_nal_t *nals;
         int i_nals;
         int frame_bytes = x264_encoder_encode(encoder, &nals, &i_nals, NULL, &pic_out);
 
         if (frame_bytes < 0) {
             printf("x264 flush hatasi\n");
-            encoder_error = 1;
+            encode_error = 1;
             break;
         }
 
@@ -287,7 +291,7 @@ int main(int argc, char *argv[]) {
 
         if (write_nals(file_out, nals, i_nals) != 0) {
             printf("H264 yazma hatasi\n");
-            encoder_error = 1;
+            encode_error = 1;
             break;
         }
 
@@ -315,7 +319,7 @@ int main(int argc, char *argv[]) {
     fclose(file_out);
     fclose(file_tc);
 
-    if (encoder_error) {
+    if (encode_error) {
         printf("Encode islemi hatayla sonlandi\n");
         return -1;
     }

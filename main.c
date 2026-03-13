@@ -1,4 +1,5 @@
 #define _FILE_OFFSET_BITS 64
+#include <errno.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -69,14 +70,32 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    int WIDTH = atoi(argv[2]);
-    int HEIGHT = atoi(argv[3]);
-    int FPS = atoi(argv[4]);
+    char *endptr;
 
-    if (WIDTH <= 0 || HEIGHT <= 0 || FPS <= 0) {
-        printf("Gecersiz piksel degeri\n");
+    errno = 0;
+    long width_long = strtol(argv[2], &endptr, 10);
+    if (errno == ERANGE || *endptr != '\0' || width_long <= 0 || width_long > 10000) {
+        printf("Gecersiz genislik degeri\n");
         return -1;
     }
+
+    errno = 0;
+    long height_long = strtol(argv[3], &endptr, 10);
+    if (errno == ERANGE || *endptr != '\0' || height_long <= 0 || height_long > 10000) {
+        printf("Gecersiz yukseklik degeri\n");
+        return -1;
+    }
+
+    errno = 0;
+    long fps_long = strtol(argv[4], &endptr, 10);
+    if (errno == ERANGE || *endptr != '\0' || fps_long <= 0 || fps_long > 1000) {
+        printf("Gecersiz fps degeri\n");
+        return -1;
+    }
+
+    int WIDTH = (int)width_long;
+    int HEIGHT = (int)height_long;
+    int FPS = (int)fps_long;
 
     if (WIDTH % 2 != 0 || HEIGHT % 2 != 0) {
         printf("Genislik ve yukseklik cift sayi olmalidir\n");
@@ -92,8 +111,8 @@ int main(int argc, char *argv[]) {
     const char *dot = strrchr(filename, '.');
     size_t name_len = dot ? (size_t)(dot - filename) : strlen(filename);
 
-    if (name_len > sizeof(base_name) - 1) {
-        printf("Dosya ismi cok uzun, islem iptal edildi\n");
+    if (name_len == 0 || name_len > sizeof(base_name) - 1) {
+        printf("Dosya ismi gecersiz veya cok uzun\n");
         return -1;
     }
 
@@ -116,10 +135,16 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    fprintf(file_tc, "# timecode format v2\n");
+    if (fprintf(file_tc, "# timecode format v4\n") < 0) {
+        printf("Timecode yazma hatasi\n");
+        fclose(file_in);
+        fclose(file_out);
+        fclose(file_tc);
+        return -1;
+    }
 
     x264_param_t param;
-    x264_param_default_preset(&param, "medium", "zerolatency");
+    x264_param_default_preset(&param, "medium", NULL);
     param.i_width = WIDTH;
     param.i_height = HEIGHT;
     param.i_fps_num = FPS;
@@ -127,7 +152,7 @@ int main(int argc, char *argv[]) {
     param.i_timebase_num = 1;
     param.i_timebase_den = FPS;
     param.b_vfr_input = 1;
-    param.i_bframe = 0;
+    param.i_bframe = 3;
 
     x264_t *encoder = x264_encoder_open(&param);
 
@@ -151,12 +176,10 @@ int main(int argc, char *argv[]) {
     }
 
     int y_size = WIDTH * HEIGHT;
-    int frame_size = y_size + (y_size / 2);
     uint8_t *prev_frame_y = (uint8_t*)calloc(y_size, 1);
 
     if (!prev_frame_y) {
         printf("Bellek ayrilamadi\n");
-        free(prev_frame_y);
         x264_picture_clean(&pic_in);
         x264_encoder_close(encoder);
         fclose(file_in);
@@ -165,75 +188,43 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    int total_frames = 0;
-    int file_error = 0;
-
-    if (fseeko(file_in, 0, SEEK_END) == 0) {
-        off_t file_size = ftello(file_in);
-
-        if (file_size <= 0) {
-            printf("Dosya boyutu okunamadi\n");
-            file_error = 1;
-        } 
-
-        else if (file_size % frame_size != 0) {
-            printf("YUV dosyasi eksik veya bozuk\n");
-            printf("Artik kalan byte: %lld\n", (long long)(file_size % frame_size));
-            file_error = 1;
-        }
-        
-        else {
-            total_frames = (int)(file_size / frame_size);
-            printf("Toplam islenecek kare: %d\n", total_frames);
-            
-            if (fseeko(file_in, 0, SEEK_SET) != 0) {
-                printf("fseeko basarisiz\n");
-                file_error = 1;
-            }
-        }
-    }
-
-    else {
-        printf("fseeko basarisiz\n");
-        file_error = 1;
-    }
-
-    if (file_error) {
-        free(prev_frame_y);
-        x264_picture_clean(&pic_in);
-        x264_encoder_close(encoder);
-        fclose(file_in);
-        fclose(file_out);
-        fclose(file_tc);
-        return -1;
-    }
-
-    int frame_count = 0;
-    int encoded_count = 0;
+    int64_t frame_count = 0;
+    int64_t encoded_count = 0;
     int encode_error = 0;
     
     while (fread(pic_in.img.plane[0], 1, y_size, file_in) == (size_t)y_size) {
 
         if (fread(pic_in.img.plane[1], 1, y_size / 4, file_in) != (size_t)(y_size / 4)) {
+            printf("U duzlemi okunamadi\n");
+            encode_error = 1;
             break;
         }
 
         if (fread(pic_in.img.plane[2], 1, y_size / 4, file_in) != (size_t)(y_size / 4)) {
+            printf("V duzlemi okunamadi\n");
+            encode_error = 1;
             break;
         }
 
         frame_count ++;
-        int is_last_frame = (total_frames > 0 && frame_count == total_frames);
         int diff = calculate_frame_difference(prev_frame_y, pic_in.img.plane[0], y_size);
 
-        if (diff < THRESHOLD && frame_count > 1 && !is_last_frame) {
-            printf("Kare: %d\t Fark: %d ATILDI\n", frame_count, diff);
+        if (diff < THRESHOLD && frame_count > 1) {
+            printf("Kare: %lld\t Fark: %d ATILDI\n", (long long)frame_count, diff);
         }
 
         else {
             pic_in.i_pts = frame_count - 1;
 
-            printf("Kare: %d\t Fark: %d\t PTS: %lld ALINDI\n", frame_count, diff, (long long int)pic_in.i_pts);
+            printf("Kare: %lld\t Fark: %d\t PTS: %lld ALINDI\n", (long long)frame_count, diff, (long long)pic_in.i_pts);
+
+            double ms = (double)(pic_in.i_pts * 1000.0 / FPS);
+            
+            if (fprintf(file_tc, "%.3f\n", ms) < 0) {
+                printf("Timecode yazma hatasi\n");
+                encode_error = 1;
+                break;
+            }
 
             x264_nal_t *nals;
             int i_nals;
@@ -253,25 +244,9 @@ int main(int argc, char *argv[]) {
                 }
 
                 encoded_count++;
-                double ms = (double)(pic_out.i_pts * 1000.0 / FPS);
-                fprintf(file_tc, "%.3f\n", ms);
             }
             memcpy(prev_frame_y, pic_in.img.plane[0], y_size);
         }
-    }
-
-    if (ferror(file_in)) {
-        printf("YUV dosyasi okunurken disk I/O hatasi olustu!\n");
-        encode_error = 1;
-    }
-
-    else if (feof(file_in)) {
-        printf("Video dosyasinin sonuna basariyla ulasildi.\n");
-    }
-
-    else {
-        printf("Bilinmeyen bir nedenden dolayi okuma yarida kesildi.\n");
-        encode_error = 1;
     }
 
     while (!encode_error) {
@@ -296,12 +271,10 @@ int main(int argc, char *argv[]) {
         }
 
         encoded_count++;
-        double ms = (double)(pic_out.i_pts * 1000.0 / FPS);
-        fprintf(file_tc, "%.3f\n", ms);
     }
 
-    printf("Toplam kare: %d\n", frame_count);
-    printf("Encode olan kare: %d\n", encoded_count);
+    printf("Toplam kare: %lld\n", (long long)frame_count);
+    printf("Encode olan kare: %lld\n", (long long)encoded_count);
 
     if (frame_count > 0) {
         float saved_percent = (1.0f - ((float)encoded_count / (float)frame_count)) * 100.0f;

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <x264.h>
@@ -35,31 +36,6 @@ int calculate_frame_difference(uint8_t *frame1, uint8_t *frame2, int size) {
     }
 
     return total_diff / size;
-}
-
-static int run_command(char *const args[]) {
-    pid_t pid = fork();
-
-    if (pid < 0) {
-        return -1;
-    }
-
-    if (pid == 0) {
-        execvp(args[0], args);
-        _exit(127);
-    }
-
-    int status = 0;
-
-    if (waitpid(pid, &status, 0) < 0) {
-        return -1;
-    }
-
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        return -1;
-    }
-
-    return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -102,6 +78,11 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
+    if (WIDTH % 32 != 0) {
+        printf("Genislik 32'nin kati olmalidir\n");
+        return -1;
+    }
+
     char h264_path[256], tc_path[256], mkv_path[256];
     char base_name[242], tc_input_arg[260];
 
@@ -122,6 +103,11 @@ int main(int argc, char *argv[]) {
     snprintf(h264_path, sizeof(h264_path), "h264/%s.h264", base_name);
     snprintf(tc_path, sizeof(tc_path), "timecode/%s.txt", base_name);
     snprintf(mkv_path, sizeof(mkv_path), "mkv/%s.mkv", base_name);
+
+    struct stat st = {0};
+    if (stat("h264", &st) == -1) mkdir("h264", 0755);
+    if (stat("timecode", &st) == -1) mkdir("timecode", 0755);
+    if (stat("mkv", &st) == -1) mkdir("mkv", 0755);
 
     FILE *file_in = fopen(yuv_path, "rb");
     FILE *file_out = fopen(h264_path, "wb");
@@ -149,6 +135,7 @@ int main(int argc, char *argv[]) {
     param.i_height = HEIGHT;
     param.i_fps_num = FPS;
     param.i_fps_den = 1;
+    param.i_csp = X264_CSP_I420;
     param.i_timebase_num = 1;
     param.i_timebase_den = FPS;
     param.b_vfr_input = 1;
@@ -166,7 +153,7 @@ int main(int argc, char *argv[]) {
 
     x264_picture_t pic_in, pic_out;
 
-    if (x264_picture_alloc(&pic_in, X264_CSP_I420, WIDTH, HEIGHT) != 0) {
+    if (x264_picture_alloc(&pic_in, param.i_csp, param.i_width, param.i_height) != 0) {
         printf("x264_picture_alloc basarisiz\n");
         x264_encoder_close(encoder);
         fclose(file_in);
@@ -301,9 +288,21 @@ int main(int argc, char *argv[]) {
     char *mkvmerge_args[] = {
         "mkvmerge", "-o", mkv_path, "--timestamps", tc_input_arg, h264_path, NULL
     };
-    
-    if (run_command(mkvmerge_args) != 0) {
-        printf("MKV birlestirme hatasi\n");
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        printf("mkvmerge baslatilamadi\n");
+        return -1;
+    }
+
+    if (pid == 0) {
+        execvp(mkvmerge_args[0], mkvmerge_args);
+        _exit(127);
+    }
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        printf("mkvmerge komutu bulunamadi\n");
         return -1;
     }
 

@@ -78,12 +78,12 @@ int main(int argc, char *argv[]) {
         printf("Genislik ve yukseklik cift sayi olmalidir\n");
         return -1;
     }
-/*
+
     if (WIDTH % 32 != 0) {
         printf("Genislik 32'nin kati olmalidir\n");
         return -1;
     }
-*/
+
     char h264_path[256], tc_path[256], mkv_path[256];
     char base_name[242], tc_input_arg[260];
 

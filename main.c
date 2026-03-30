@@ -11,6 +11,7 @@
 #include <x264.h>
 
 #define THRESHOLD 5
+#define MAX_SKIP_FRAMES FPS
 
 static int write_nals(FILE *file_out, x264_nal_t *nals, int i_nals) {
     
@@ -77,12 +78,12 @@ int main(int argc, char *argv[]) {
         printf("Genislik ve yukseklik cift sayi olmalidir\n");
         return -1;
     }
-
+/*
     if (WIDTH % 32 != 0) {
         printf("Genislik 32'nin kati olmalidir\n");
         return -1;
     }
-
+*/
     char h264_path[256], tc_path[256], mkv_path[256];
     char base_name[242], tc_input_arg[260];
 
@@ -140,6 +141,8 @@ int main(int argc, char *argv[]) {
     param.i_timebase_den = FPS;
     param.b_vfr_input = 1;
     param.i_bframe = 3;
+    param.b_repeat_headers = 1;
+    param.b_annexb = 1;
 
     x264_t *encoder = x264_encoder_open(&param);
 
@@ -177,6 +180,7 @@ int main(int argc, char *argv[]) {
 
     int64_t frame_count = 0;
     int64_t encoded_count = 0;
+    int skipped_frames = 0;
     int encode_error = 0;
     
     while (fread(pic_in.img.plane[0], 1, y_size, file_in) == (size_t)y_size) {
@@ -196,12 +200,14 @@ int main(int argc, char *argv[]) {
         frame_count ++;
         int diff = calculate_frame_difference(prev_frame_y, pic_in.img.plane[0], y_size);
 
-        if (diff < THRESHOLD && frame_count > 1) {
+        if (diff < THRESHOLD && frame_count > 1 && skipped_frames < MAX_SKIP_FRAMES) {
             printf("Kare: %lld\t Fark: %d ATILDI\n", (long long)frame_count, diff);
+            skipped_frames++;
         }
 
         else {
             pic_in.i_pts = frame_count - 1;
+            skipped_frames = 0;
 
             printf("Kare: %lld\t Fark: %d\t PTS: %lld ALINDI\n", (long long)frame_count, diff, (long long)pic_in.i_pts);
 
@@ -236,7 +242,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    while (!encode_error) {
+    while (!encode_error && x264_encoder_delayed_frames(encoder) > 0) {
         x264_nal_t *nals;
         int i_nals;
         int frame_bytes = x264_encoder_encode(encoder, &nals, &i_nals, NULL, &pic_out);
@@ -248,7 +254,7 @@ int main(int argc, char *argv[]) {
         }
 
         if (frame_bytes == 0) {
-            break;
+            continue;
         }
 
         if (write_nals(file_out, nals, i_nals) != 0) {

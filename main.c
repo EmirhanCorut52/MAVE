@@ -12,35 +12,49 @@
 
 #define THRESHOLD 5
 #define MAX_SKIP_FRAMES FPS
+#define BLOCK_SIZE 16
 
 static int write_nals(FILE *file_out, x264_nal_t *nals, int i_nals) {
-    
     for (int i = 0; i < i_nals; i++) {
         if (fwrite(nals[i].p_payload, 1, nals[i].i_payload, file_out) != (size_t)nals[i].i_payload) {
             return -1;
         }
     }
-
     return 0;
 }
 
-int calculate_frame_difference(uint8_t *frame1, uint8_t *frame2, int size) {
-    uint64_t total_diff = 0;
+int calculate_frame_difference(uint8_t *frame1, uint8_t *frame2, int width, int height) {
+    int max_block_diff = 0;
 
-    if (size == 0) {
-        return 0;
+    for (int by = 0; by < height; by += BLOCK_SIZE) {
+        for (int bx = 0; bx < width; bx += BLOCK_SIZE) {
+            
+            uint32_t block_diff = 0;
+            int pixel_count = 0;
+
+            int current_block_height = (by + BLOCK_SIZE > height) ? (height - by) : BLOCK_SIZE;
+            int current_block_width = (bx + BLOCK_SIZE > width) ? (width - bx) : BLOCK_SIZE;
+
+            for (int y = 0; y < current_block_height; y++) {
+                int offset_y = (by + y) * width;
+                for (int x = 0; x < current_block_width; x++) {
+                    int offset = offset_y + (bx + x);
+                    block_diff += abs((int)frame1[offset] - (int)frame2[offset]);
+                    pixel_count++;
+                }
+            }
+
+            int avg_block_diff = block_diff / pixel_count;
+            if (avg_block_diff > max_block_diff) {
+                max_block_diff = avg_block_diff;
+            }
+        }
     }
 
-    for (int i = 0; i < size; i++) {
-        int diff = abs((int)frame1[i] - (int)frame2[i]);
-        total_diff += diff;
-    }
-
-    return total_diff / size;
+    return max_block_diff;
 }
 
 int main(int argc, char *argv[]) {
-
     if (argc != 5) {
         printf("Hatali arguman sayisi\n");
         printf("Kullanim: <input.yuv> <yatay piksel> <dikey piksel> <fps>\n");
@@ -76,11 +90,6 @@ int main(int argc, char *argv[]) {
 
     if (WIDTH % 2 != 0 || HEIGHT % 2 != 0) {
         printf("Genislik ve yukseklik cift sayi olmalidir\n");
-        return -1;
-    }
-
-    if (WIDTH % 32 != 0) {
-        printf("Genislik 32'nin kati olmalidir\n");
         return -1;
     }
 
@@ -198,7 +207,7 @@ int main(int argc, char *argv[]) {
         }
 
         frame_count ++;
-        int diff = calculate_frame_difference(prev_frame_y, pic_in.img.plane[0], y_size);
+        int diff = calculate_frame_difference(prev_frame_y, pic_in.img.plane[0], WIDTH, HEIGHT);
 
         if (diff < THRESHOLD && frame_count > 1 && skipped_frames < MAX_SKIP_FRAMES) {
             printf("Kare: %lld\t Fark: %d ATILDI\n", (long long)frame_count, diff);

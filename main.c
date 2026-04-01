@@ -10,9 +10,15 @@
 #include <sys/types.h>
 #include <x264.h>
 
-#define THRESHOLD 5
-#define MAX_SKIP_FRAMES FPS
 #define BLOCK_SIZE 16
+
+#define PIXEL_THRESHOLD 20
+#define BLOCK_COUNT_THRESHOLD 4
+
+#define IGNORE_TOP_BLOCKS 6
+#define IGNORE_BOTTOM_BLOCKS 6
+#define IGNORE_LEFT_BLOCKS 4
+#define IGNORE_RIGHT_BLOCKS 4
 
 static int write_nals(FILE *file_out, x264_nal_t *nals, int i_nals) {
     for (int i = 0; i < i_nals; i++) {
@@ -24,16 +30,19 @@ static int write_nals(FILE *file_out, x264_nal_t *nals, int i_nals) {
 }
 
 int calculate_frame_difference(uint8_t *frame1, uint8_t *frame2, int width, int height) {
-    int max_block_diff = 0;
+    int active_blocks = 0;
+    int start_y = IGNORE_TOP_BLOCKS * BLOCK_SIZE;
+    int end_y = height - (IGNORE_BOTTOM_BLOCKS * BLOCK_SIZE);
+    int start_x = IGNORE_LEFT_BLOCKS * BLOCK_SIZE;
+    int end_x = width - (IGNORE_RIGHT_BLOCKS * BLOCK_SIZE);
 
-    for (int by = 0; by < height; by += BLOCK_SIZE) {
-        for (int bx = 0; bx < width; bx += BLOCK_SIZE) {
+    for (int by = start_y; by < end_y; by += BLOCK_SIZE) {
+        for (int bx = start_x; bx < end_x; bx += BLOCK_SIZE) {
             
             uint32_t block_diff = 0;
             int pixel_count = 0;
-
-            int current_block_height = (by + BLOCK_SIZE > height) ? (height - by) : BLOCK_SIZE;
-            int current_block_width = (bx + BLOCK_SIZE > width) ? (width - bx) : BLOCK_SIZE;
+            int current_block_height = (by + BLOCK_SIZE > end_y) ? (end_y - by) : BLOCK_SIZE;
+            int current_block_width = (bx + BLOCK_SIZE > end_x) ? (end_x - bx) : BLOCK_SIZE;
 
             for (int y = 0; y < current_block_height; y++) {
                 int offset_y = (by + y) * width;
@@ -45,13 +54,14 @@ int calculate_frame_difference(uint8_t *frame1, uint8_t *frame2, int width, int 
             }
 
             int avg_block_diff = block_diff / pixel_count;
-            if (avg_block_diff > max_block_diff) {
-                max_block_diff = avg_block_diff;
+            
+            if (avg_block_diff > PIXEL_THRESHOLD) {
+                active_blocks++;
             }
         }
     }
 
-    return max_block_diff;
+    return active_blocks;
 }
 
 int main(int argc, char *argv[]) {
@@ -189,9 +199,9 @@ int main(int argc, char *argv[]) {
 
     int64_t frame_count = 0;
     int64_t encoded_count = 0;
-    int skipped_frames = 0;
     int encode_error = 0;
-    
+    int skipped_frames = 0;
+
     while (fread(pic_in.img.plane[0], 1, y_size, file_in) == (size_t)y_size) {
 
         if (fread(pic_in.img.plane[1], 1, y_size / 4, file_in) != (size_t)(y_size / 4)) {
@@ -209,16 +219,15 @@ int main(int argc, char *argv[]) {
         frame_count ++;
         int diff = calculate_frame_difference(prev_frame_y, pic_in.img.plane[0], WIDTH, HEIGHT);
 
-        if (diff < THRESHOLD && frame_count > 1 && skipped_frames < MAX_SKIP_FRAMES) {
-            printf("Kare: %lld\t Fark: %d ATILDI\n", (long long)frame_count, diff);
+        if (diff < BLOCK_COUNT_THRESHOLD && frame_count > 1 && skipped_frames < FPS) {
             skipped_frames++;
+            printf("Kare: %lld\t Fark: %d ATILDI\n", (long long)frame_count, diff);
         }
 
         else {
             pic_in.i_pts = frame_count - 1;
-            skipped_frames = 0;
 
-            printf("Kare: %lld\t Fark: %d\t PTS: %lld ALINDI\n", (long long)frame_count, diff, (long long)pic_in.i_pts);
+            printf("Kare: %lld\t Fark: %d\t PTS: %lld ALINDI\n",(long long)frame_count, diff, (long long)pic_in.i_pts);
 
             double ms = (double)(pic_in.i_pts * 1000.0 / FPS);
             

@@ -78,5 +78,3 @@ Kare tasarruf orani: % 70.00
 ```
 
 ***
-
-Bu dokümantasyon kodunun yeteneklerini oldukça profesyonel bir çerçevede özetliyor. Geliştirme sürecini daha da otomatize etmek için projeye bir `Makefile` eklemek istersen veya C kodundaki bellek yönetimi (örneğin YUV okuma kısımlarındaki `malloc`/`free` döngüleri) üzerine çalışmak istersen bana söylemen yeterli. Nasıl buldun bu yapıyı?

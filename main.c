@@ -12,8 +12,8 @@
 
 #define BLOCK_SIZE 16
 
-#define PIXEL_THRESHOLD 20
-#define BLOCK_COUNT_THRESHOLD 4
+#define PIXEL_THRESHOLD 35
+#define BLOCK_COUNT_THRESHOLD 100
 
 #define IGNORE_TOP_BLOCKS 6
 #define IGNORE_BOTTOM_BLOCKS 6
@@ -255,6 +255,7 @@ int main(int argc, char *argv[]) {
                 }
 
                 encoded_count++;
+                skipped_frames = 0;
             }
             memcpy(prev_frame_y, pic_in.img.plane[0], y_size);
         }

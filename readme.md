@@ -1,80 +1,71 @@
-# VFR-H264: H.264 Codec için Değişken Kare Hızı (Varriable Frame Rate) Entegrasyonu
+# MAVE (Motion Aware VFR Encoder)
 
-## 📌 Amaç ve Vizyon
-Standart video kameraları genellikle Sabit Kare Hızı (Constant Frame Rate - CFR) ile kayıt yapar. Bu durum, videoda hiçbir hareketin olmadığı (örneğin boş bir oda, slayt sunumu veya güvenlik kamerası kayıtları) sahnelerde bile saniyede onlarca birbirinin aynısı karenin (frame) işlenmesine ve depolanmasına neden olur. 
+MAVE is a custom Variable Frame Rate (VFR) H.264 encoder written in C, designed to significantly reduce video file sizes. 
 
-**VFR-H264** projesinin vizyonu, bu gereksiz veri yığınını ortadan kaldırmaktır. Proje, ham video (YUV) verisini analiz ederek birbirini tekrar eden statik kareleri tespit eder ve kodlama (encoding) sürecinden dışlar. Bu sayede görsel kaliteden hiçbir ödün vermeden **ciddi oranda depolama alanı ve bant genişliği tasarrufu** sağlanır. Senkronizasyon kayıplarını önlemek için ise her karenin sunum zaman damgası (PTS) özel bir timecode dosyasına yazılarak video kapsayıcısına (MKV) otomatik olarak gömülür.
+It works by analyzing the luminance (Luma/Y channel) differences between consecutive frames in raw YUV video. If no significant motion is detected (e.g., in static scenes, presentations, or talking-head videos), MAVE drops the redundant frames. To maintain perfect audio and video synchronization, it generates a Timecode v4 file and automatically muxes the final output into an MKV container.
 
+## 🚀 Features
 
+*   **Smart Frame Dropping:** Distinguishes between natural camera noise and actual motion using customizable pixel and block thresholds.
+*   **Margin Ignore:** Excludes the edges of the video (where logos, subtitles, or edge-flickering might occur) from motion calculation to prevent false positives.
+*   **Timecode V4 Generation:** Creates precise, millisecond-accurate timestamps for every encoded frame to prevent audio/video desync.
+*   **Automated Muxing:** Uses `mkvmerge` to bundle the `.h264` video stream and timecodes into a final `.mkv` file.
 
-## ⚙️ Teknik Detaylar ve Mimari
+## 📋 Prerequisites
 
-Yazılım C dili ile geliştirilmiş olup, H.264 kodlaması için `libx264` kütüphanesini kullanmaktadır. Süreç şu adımlarla işler:
+Before using MAVE, ensure you have the following installed on your system:
+*   **GCC:** For compiling the C code.
+*   **libx264:** The H.264 encoder library (`libx264-dev`).
+*   **FFmpeg:** For extracting raw YUV data from your source videos.
+*   **MKVToolNix (`mkvmerge`):** For muxing the final MKV file.
 
-1. **Ham Veri Okuma:** `.yuv` formatındaki ham video dosyası (YUV420p renk uzayında) okunur.
-2. **Kare Farkı Hesaplama (Luma Analizi):** Gelen her yeni karenin yalnızca Y (Luminance - Parlaklık) düzlemi piksel piksel bir önceki kare ile karşılaştırılır. Mutlak farkların ortalaması alınarak bir eşik değeri (Threshold) ile kıyaslanır. (Varsayılan Eşik: `5`).
-3. **Akıllı Çerçeve Düşürme (Frame Drop):** Eğer iki kare arasındaki fark eşik değerinin altındaysa, sahnede hareket olmadığı varsayılır ve kare H.264 kodlayıcısına gönderilmez (ATILDI).
-4. **Zaman Damgası (Timecode) Üretimi:** Alınan her orijinal karenin orijinal sırası (PTS) milisaniye cinsinden hesaplanır ve *v4 timecode* formatında bir metin dosyasına yazılır. Bu, ses ve görüntü senkronizasyonunun kaybolmasını engeller.
-5. **Otomatik Çoklama (Multiplexing):** Kodlama bittikten sonra yazılım, işletim sistemi seviyesinde (`fork/execvp`) `mkvmerge` aracını çağırarak elde edilen `.h264` video akışını ve zaman damgası dosyasını tek bir `.mkv` dosyasında birleştirir.
+## 🛠️ Compilation
 
-## 🛠️ Sistem Gereksinimleri
-Bu projeyi derlemek ve çalıştırmak için sisteminizde aşağıdaki paketlerin kurulu olması gerekmektedir:
-* `gcc` (C Derleyicisi)
-* `libx264-dev` (H.264 encoding kütüphanesi)
-* `ffmpeg` (Ön işleme ve YUV dönüşümleri için)
-* `mkvtoolnix` (İçerisindeki `mkvmerge` aracının MKV paketlemesi yapabilmesi için)
-
-## 🚀 Kurulum ve Kullanım
-
-### 1. Kodu Derleme
-Proje dizininde terminali açın ve aşağıdaki komutla C kodunu derleyin:
+Compile the source code using `gcc` with the x264 library linked:
 ```bash
 gcc main.c -o vfr -lx264 -Wall
 ```
 
-### 2. Ham Video (YUV) Hazırlığı
-Program ham YUV420p verisi işlediği için, elinizdeki standart bir videoyu (mp4, mov vb.) öncelikle ffmpeg ile dönüştürmelisiniz.
+## 📖 Usage Pipeline
 
-* **Standart Videolar İçin:**
-  ```bash
-  ffmpeg -i input.mp4 -c:v rawvideo -s 1920x1080 yuv/input.yuv
-  ```
-* **iPhone Kamera Kayıtları İçin** (Renk uzayını zorlamak gerekebilir):
-  ```bash
-  ffmpeg -i input.mov -c:v rawvideo -pix_fmt yuv420p -s 1920x1080 yuv/input.yuv
-  ```
+The standard workflow consists of three main steps: extracting the raw video, encoding it with MAVE, and (optionally) manually muxing it with audio.
 
-### 3. Programı Çalıştırma
-Derlediğiniz `vfr` aracını; input dosyası, genişlik, yükseklik ve orijinal FPS değerlerini argüman olarak vererek çalıştırın. Genişlik ve yükseklik değerleri 2'nin (genişlik 32'nin) katı olmalıdır.
+*Note: Ensure the required directories (`yuv/`, `h264/`, `timecode/`, `mkv/`, `aac/`) exist in your working environment before running the commands.*
+
+### Step 1: Extract YUV Output
+First, convert your source video into raw YUV format using FFmpeg.
+
+**Normal Extraction:**
 ```bash
-./vfr yuv/input.yuv 1920 1080 30
+ffmpeg -i input/<filename>.mp4 -c:v rawvideo -s 1920x1080 yuv/<filename>.yuv
 ```
 
-*Not: Program çalıştığında `h264`, `timecode` ve `mkv` klasörlerini otomatik olarak oluşturacak ve çıktıları buralara kaydedecektir.*
-
-### 4. Ses (Audio) Ekleme (İsteğe Bağlı)
-Program şu an sadece video akışını işlemektedir. Eğer orijinal videonuzdaki sesi MKV dosyanıza dahil etmek isterseniz, sesi ayırıp MKVToolNix ile sonradan birleştirebilirsiniz:
+**Force Pixel Format (Recommended):**
+To ensure compatibility with MAVE (which expects I420 color space), it is highly recommended to force the pixel format:
 ```bash
-# Sesi aac olarak ayırma
-ffmpeg -i input.mp4 -vn -c:a aac aac/audio.aac
-
-# Manuel birleştirme (Opsiyonel)
-mkvmerge -o mkv/final.mkv mkv/input.mkv aac/audio.aac
+ffmpeg -i input/<filename>.mp4 -c:v rawvideo -pix_fmt yuv420p -s 1920x1080 yuv/<filename>.yuv
 ```
 
-## 📊 Örnek Çıktı
-
-Konsolda işleme sırasında aşağıdaki gibi bir log ekranı göreceksiniz. Süreç sonunda elde edilen "Kare Tasarruf Oranı", videonun ne kadar durağan olduğuna bağlı olarak dosya boyutundaki kazancınızı temsil eder.
-
-```text
-Kare: 1    Fark: 0      PTS: 0 ALINDI
-Kare: 2    Fark: 2 ATILDI
-Kare: 3    Fark: 1 ATILDI
-Kare: 4    Fark: 15     PTS: 3 ALINDI
-...
-Toplam kare: 1500
-Encode olan kare: 450
-Kare tasarruf orani: % 70.00
+### Step 2: Execute MAVE (Encode)
+Run the compiled `vfr` executable by providing the input file, horizontal pixels (width), vertical pixels (height), and the original framerate.
+```bash
+./vfr yuv/<filename>.yuv <width> <height> <fps>
+```
+*Example for a 1080p 60FPS video:*
+```bash
+./vfr yuv/video.yuv 1920 1080 60
 ```
 
-***
+### Step 3: Muxing (MKV Output)
+While the C code automatically attempts to trigger `mkvmerge` for the video and timecodes, you can manually mux the files if you want to include an audio track (like AAC) that you extracted separately:
+```bash
+mkvmerge -o mkv/<filename>.mkv --timestamps 0:timecode/<filename>.txt h264/<filename>.h264 aac/<filename>.aac
+```
+
+## ⚙️ Developer Settings (Tuning)
+
+You can adjust the sensitivity of the motion detection by modifying the macros inside `main.c` before compiling:
+
+*   `PIXEL_THRESHOLD` (e.g., 35): The average difference in brightness required for a block of pixels to be considered "changed". Higher values make it less sensitive to noise but might miss subtle movements.
+*   `BLOCK_COUNT_THRESHOLD` (e.g., 100): The minimum number of changed blocks required in a single frame to trigger an encode. If the changed blocks are below this number, the frame is dropped.
+```
